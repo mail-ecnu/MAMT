@@ -1,4 +1,6 @@
 import numpy as np
+import bz2
+import _pickle as cPickle
 from torch import Tensor
 from torch.autograd import Variable
 
@@ -94,3 +96,23 @@ class ReplayBuffer(object):
         else:
             inds = np.arange(max(0, self.curr_i - N), self.curr_i)
         return [self.rew_buffs[i][inds].mean() for i in range(self.num_agents)]
+
+    def to_file(self, path):
+        my_data = {'obs':self.obs_buffs, 'ac': self.ac_buffs, 
+        'rew': self.rew_buffs, 'next_obs': self.next_obs_buffs, 
+        'done': self.done_buffs, 'fill_i': self.filled_i, 'curr_i': self.curr_i}
+        with bz2.BZ2File(str(path) + '.pbz2', 'w') as f:
+            cPickle.dump(my_data, f)
+        print('successfully export')
+    
+    def load_file(self, path):
+        my_data = bz2.BZ2File(path, 'rb')
+        my_data = cPickle.load(my_data)
+        self.obs_buffs = my_data['obs']
+        self.ac_buffs = my_data['ac']
+        self.rew_buffs = my_data['rew']
+        self.next_obs_buffs = my_data['next_obs']
+        self.done_buffs = my_data['done']
+        self.filled_i = my_data['fill_i']
+        self.curr_i = my_data['curr_i']
+
