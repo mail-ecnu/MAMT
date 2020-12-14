@@ -3,6 +3,8 @@ models
 fig_data
 notebooks
 multi_run*
+baselines
+multiagent-particle-envs
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
