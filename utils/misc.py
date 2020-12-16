@@ -1,9 +1,12 @@
 import os
+from itertools import product
 import torch
 import torch.nn.functional as F
 import torch.distributed as dist
+from torch import Tensor
 from torch.autograd import Variable
 import numpy as np
+from progressbar import ProgressBar
 
 # https://github.com/ikostrikov/pytorch-ddpg-naf/blob/master/ddpg.py#L11
 def soft_update(target, source, tau):
@@ -131,3 +134,42 @@ def sep_clip_grad_norm(parameters, max_norm, norm_type=2):
         clip_coef = max_norm / (p_norm + 1e-6)
         if clip_coef < 1:
             p.grad.data.mul_(clip_coef)
+
+def calculate_divergence(dataset, model, n_actions):
+    n_agents = model.nagents
+    obs = dataset.obs_buffs # (n_agents, batch_size, o_dim)
+    # acs = np.array(list(product(*([set(tuple(map(tuple, np.eye(n_actions))))] * n_agents)))) # (n_actions ^ n_agents, n_agents, a_dim)
+    acs = np.array([np.eye(n_actions).tolist()] * n_agents).transpose(1, 0, 2)
+    n_permute = len(acs)
+    batch_size = len(obs[0])
+    repeated_obs = []
+    for a_obs in obs:
+        a_obs = Variable(Tensor(a_obs), requires_grad=False)
+        repeated_obs.append(a_obs.repeat_interleave(torch.ones(batch_size, dtype=torch.long)*n_permute, dim=0))
+    acs = Variable(Tensor(acs), requires_grad=False).permute(1, 0, 2)
+    repeated_acs = []
+    for a_ac in acs:
+        repeated_acs.append(a_ac.repeat(batch_size, 1))
+
+    distances = [0.0] * n_agents
+    bar = ProgressBar()    
+    for i in bar(range(0, len(repeated_obs[0]), n_permute)):
+        if i+n_permute <= len(repeated_obs[0]) - 1:
+            sliced_obs = [a_obs[i:i+n_permute].cuda() for a_obs in repeated_obs]
+            sliced_acs = [a_ac[i:i+n_permute].cuda() for a_ac in repeated_acs]
+        else:
+            sliced_obs = [a_obs[i:].cuda() for a_obs in repeated_obs]
+            sliced_acs = [a_ac[i:].cuda() for a_ac in repeated_acs]
+        critic_in = list(zip(sliced_obs, sliced_acs))
+        critic_rets = model.critic(critic_in)
+        for a_i, ret in enumerate(critic_rets):
+            ret = ret.detach().cpu().numpy()
+            # TODO: calculate positive value distance and negative value distance
+            # remove the maximum value
+            # ret = np.expand_dims(ret[ret != np.max(ret)], axis=0)
+            # scale to [0, 1]
+            # ret = (ret - np.min(ret)) / (np.max(ret) - np.min(ret))
+            ret = ret / np.max(ret)
+            distances[a_i] += np.mean(np.sum(np.sqrt((ret - ret.T) ** 2), axis=1))
+
+    return [d / batch_size for d in distances]

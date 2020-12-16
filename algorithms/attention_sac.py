@@ -141,6 +141,7 @@ class AttentionSAC(object):
         for a_i, probs, log_pi, pol_regs, (q, all_q) in zip(range(self.nagents), all_probs,
                                                             all_log_pis, all_pol_regs,
                                                             critic_rets):
+            # import pdb; pdb.set_trace()
             curr_agent = self.agents[a_i]
             v = (all_q * probs).sum(dim=1, keepdim=True)
             pol_target = q - v

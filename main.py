@@ -8,6 +8,7 @@ from torch.autograd import Variable
 from tensorboardX import SummaryWriter
 from utils.make_env import make_env
 from utils.buffer import ReplayBuffer
+from utils.misc import calculate_divergence
 from utils.env_wrappers import SubprocVecEnv, DummyVecEnv
 from algorithms.attention_sac import AttentionSAC
 
@@ -59,6 +60,19 @@ def run(config):
                                  [obsp.shape[0] for obsp in env.observation_space],
                                  [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
                                   for acsp in env.action_space])
+                        
+    div_rb = ReplayBuffer(config.buffer_length, model.nagents,
+                                 [obsp.shape[0] for obsp in env.observation_space],
+                                 [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
+                                  for acsp in env.action_space])
+    if config.diverge_mode == 'random':
+        div_rb_path = Path('data') / config.env_id / \
+            config.model_name / 'random' / str(config.seed) / 'random_states.pbz2'
+    else:
+        div_rb_path = Path('data') / config.env_id / \
+            config.model_name / 'elite' / str(config.seed) / 'elite_states.pbz2'
+    div_rb.load_file(div_rb_path)
+
     t = 0
     for ep_i in range(0, config.n_episodes, config.n_rollout_threads):
         print("Episodes %i-%i of %i" % (ep_i + 1,
@@ -107,6 +121,13 @@ def run(config):
             model.save(run_dir / 'incremental' / ('model_ep%i.pt' % (ep_i + 1)))
             model.save(run_dir / 'model.pt')
 
+            model.prep_training(device='gpu')
+            with torch.set_grad_enabled(False):
+                divs = calculate_divergence(div_rb, model, env.action_space[0].n)
+            for a_i, div in enumerate(divs):
+                logger.add_scalar('agent%i/mean_random_divs' % a_i, div, ep_i)
+            model.prep_rollouts(device='cpu')
+
     model.save(run_dir / 'model.pt')
     env.close()
     logger.export_scalars_to_json(str(log_dir / 'summary.json'))
@@ -119,6 +140,8 @@ if __name__ == '__main__':
     parser.add_argument("model_name",
                         help="Name of directory to store " +
                              "model/training contents")
+    parser.add_argument("--seed", default=42, type=int)
+    parser.add_argument("--diverge_mode", default='random', type=str)
     parser.add_argument("--n_rollout_threads", default=12, type=int)
     parser.add_argument("--buffer_length", default=int(1e6), type=int)
     parser.add_argument("--n_episodes", default=50000, type=int)

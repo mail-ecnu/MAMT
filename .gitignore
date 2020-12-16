@@ -5,6 +5,8 @@ notebooks
 multi_run*
 baselines
 multiagent-particle-envs
+data
+results
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

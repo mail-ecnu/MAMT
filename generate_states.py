@@ -26,7 +26,7 @@ def make_parallel_env(env_id, n_rollout_threads, seed):
         return SubprocVecEnv([get_env_fn(i) for i in range(n_rollout_threads)])
 
 def run(config):
-    # model_dir = Path('./models') / config.env_id / config.model_name
+    model_dir = Path('./models') / config.env_id / config.model_name
     # if not model_dir.exists():
     #     run_num = 1
     # else:
@@ -37,8 +37,8 @@ def run(config):
     #         run_num = 1
     #     else:
     #         run_num = max(exst_run_nums) + 1
-    # curr_run = 'run%i' % run_num
-    # run_dir = model_dir / curr_run
+    curr_run = 'run%i' % config.run_num
+    run_dir = model_dir / curr_run
     # log_dir = run_dir / 'logs'
     # os.makedirs(log_dir)
     # logger = SummaryWriter(str(log_dir))
@@ -49,15 +49,19 @@ def run(config):
     np.random.seed(config.seed)
     # env = make_parallel_env(config.env_id, config.n_rollout_threads, run_num)
     env = make_parallel_env(config.env_id, config.n_rollout_threads, config.seed)
-    model = AttentionSAC.init_from_env(env,
-                                       tau=config.tau,
-                                       pi_lr=config.pi_lr,
-                                       q_lr=config.q_lr,
-                                       gamma=config.gamma,
-                                       pol_hidden_dim=config.pol_hidden_dim,
-                                       critic_hidden_dim=config.critic_hidden_dim,
-                                       attend_heads=config.attend_heads,
-                                       reward_scale=config.reward_scale)
+    if config.run_num < 0:
+        model = AttentionSAC.init_from_env(env,
+                                        tau=config.tau,
+                                        pi_lr=config.pi_lr,
+                                        q_lr=config.q_lr,
+                                        gamma=config.gamma,
+                                        pol_hidden_dim=config.pol_hidden_dim,
+                                        critic_hidden_dim=config.critic_hidden_dim,
+                                        attend_heads=config.attend_heads,
+                                        reward_scale=config.reward_scale)
+    else:
+        model = AttentionSAC.init_from_save(run_dir / 'model.pt', load_critic=True)
+        print(f'Successfully loaded model from {run_dir}!')
     replay_buffer = ReplayBuffer(config.buffer_length, model.nagents,
                                  [obsp.shape[0] for obsp in env.observation_space],
                                  [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
@@ -87,6 +91,15 @@ def run(config):
             t += config.n_rollout_threads
     
     assert len(replay_buffer) == config.buffer_length
+    if config.run_num < 0:
+        dataset_dir = Path('data') / config.env_id / config.model_name / 'random' / str(config.seed)
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+        dataset_path = dataset_dir / 'random_states'
+    else:
+        dataset_dir = Path('data') / config.env_id / config.model_name / 'elite' / str(config.seed)
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+        dataset_path = dataset_dir / 'elite_states'
+    replay_buffer.to_file(dataset_path)
 
     env.close()
 
@@ -98,6 +111,7 @@ if __name__ == '__main__':
                         help="Name of directory to store " +
                              "model/training contents")
     parser.add_argument("--seed", default=42, type=int)
+    parser.add_argument("--run_num", default=-1, type=int)
     parser.add_argument("--n_rollout_threads", default=12, type=int)
     parser.add_argument("--n_episodes", default=120, type=int)
     parser.add_argument("--episode_length", default=25, type=int)
@@ -115,6 +129,7 @@ if __name__ == '__main__':
 
     assert config.n_episodes % config.n_rollout_threads == 0
 
-    config.buffer_length = config.n_rollout_threads * config.episode_length * config.n_episodes
+    config.buffer_length = config.n_rollout_threads * config.episode_length \
+        * (config.n_episodes // config.n_rollout_threads)
 
     run(config)
