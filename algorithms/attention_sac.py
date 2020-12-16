@@ -118,7 +118,7 @@ class AttentionSAC(object):
             logger.add_scalar('grad_norms/q', grad_norm, self.niter)
         self.niter += 1
 
-    def update_policies(self, sample, soft=True, logger=None, **kwargs):
+    def update_policies(self, sample, coma=True, soft=True, logger=None, **kwargs):
         obs, acs, rews, next_obs, dones = sample
         samp_acs = []
         all_probs = []
@@ -144,7 +144,7 @@ class AttentionSAC(object):
             # import pdb; pdb.set_trace()
             curr_agent = self.agents[a_i]
             v = (all_q * probs).sum(dim=1, keepdim=True)
-            pol_target = q - v
+            pol_target = (q - v) if coma else q
             if soft:
                 pol_loss = (log_pi * (log_pi / self.reward_scale - pol_target).detach()).mean()
             else:

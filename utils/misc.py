@@ -135,9 +135,18 @@ def sep_clip_grad_norm(parameters, max_norm, norm_type=2):
         if clip_coef < 1:
             p.grad.data.mul_(clip_coef)
 
-def calculate_divergence(dataset, model, n_actions):
+def calculate_divergence(dataset, model, n_actions, 
+                         mode='random', old_s_divs=None, signs=None):
     n_agents = model.nagents
-    obs = dataset.obs_buffs # (n_agents, batch_size, o_dim)
+    if mode != 'recent':
+        obs = dataset.obs_buffs # (n_agents, batch_size, o_dim)
+    else:
+        N = 3000
+        if dataset.filled_i == dataset.max_steps:
+            inds = np.arange(dataset.curr_i - N, dataset.curr_i)  # allow for negative indexing
+        else:
+            inds = np.arange(max(0, dataset.curr_i - N), dataset.curr_i)
+        obs = [dataset.obs_buffs[i][inds] for i in range(n_agents)]
     # acs = np.array(list(product(*([set(tuple(map(tuple, np.eye(n_actions))))] * n_agents)))) # (n_actions ^ n_agents, n_agents, a_dim)
     acs = np.array([np.eye(n_actions).tolist()] * n_agents).transpose(1, 0, 2)
     n_permute = len(acs)
@@ -152,6 +161,7 @@ def calculate_divergence(dataset, model, n_actions):
         repeated_acs.append(a_ac.repeat(batch_size, 1))
 
     distances = [0.0] * n_agents
+    s_divs = [[] for i in range(n_agents)]
     bar = ProgressBar()    
     for i in bar(range(0, len(repeated_obs[0]), n_permute)):
         if i+n_permute <= len(repeated_obs[0]) - 1:
@@ -164,12 +174,24 @@ def calculate_divergence(dataset, model, n_actions):
         critic_rets = model.critic(critic_in)
         for a_i, ret in enumerate(critic_rets):
             ret = ret.detach().cpu().numpy()
-            # TODO: calculate positive value distance and negative value distance
-            # remove the maximum value
-            # ret = np.expand_dims(ret[ret != np.max(ret)], axis=0)
             # scale to [0, 1]
             # ret = (ret - np.min(ret)) / (np.max(ret) - np.min(ret))
             ret = ret / np.max(ret)
-            distances[a_i] += np.mean(np.sum(np.sqrt((ret - ret.T) ** 2), axis=1))
+            # TODO: calculate positive value distance and negative value distance
+            # remove the maximum value
+            # ret = np.expand_dims(ret[ret != np.max(ret)], axis=0)
+            # remove zero
+            ret = np.expand_dims(ret[ret != 0.0], axis=0)
+            min_pos = np.min(ret[ret > 0])
+            max_neg = np.max(ret[ret < 0])
+            _d = np.sqrt((min_pos - max_neg) ** 2)
+            # _d = np.mean(np.sum(np.sqrt((ret - ret.T) ** 2), axis=1))
+            distances[a_i] += _d
+            s_divs[a_i].append(_d)
 
-    return [d / batch_size for d in distances]
+    if old_s_divs: 
+        if not signs:
+            signs = []
+        signs.append(np.sign(np.array(s_divs) - np.array(old_s_divs)))
+
+    return [d / batch_size for d in distances], s_divs, signs

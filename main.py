@@ -44,6 +44,8 @@ def run(config):
     os.makedirs(log_dir)
     logger = SummaryWriter(str(log_dir))
 
+    coma = not config.no_coma
+
     torch.manual_seed(run_num)
     np.random.seed(run_num)
     env = make_parallel_env(config.env_id, config.n_rollout_threads, run_num)
@@ -60,20 +62,28 @@ def run(config):
                                  [obsp.shape[0] for obsp in env.observation_space],
                                  [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
                                   for acsp in env.action_space])
-                        
-    div_rb = ReplayBuffer(config.buffer_length, model.nagents,
-                                 [obsp.shape[0] for obsp in env.observation_space],
-                                 [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
-                                  for acsp in env.action_space])
-    if config.diverge_mode == 'random':
-        div_rb_path = Path('data') / config.env_id / \
-            config.model_name / 'random' / str(config.seed) / 'random_states.pbz2'
-    else:
-        div_rb_path = Path('data') / config.env_id / \
-            config.model_name / 'elite' / str(config.seed) / 'elite_states.pbz2'
-    div_rb.load_file(div_rb_path)
+    div_rb = None
+    if config.diverge_mode != 'recent':              
+        div_rb = ReplayBuffer(config.buffer_length, model.nagents,
+                                    [obsp.shape[0] for obsp in env.observation_space],
+                                    [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
+                                    for acsp in env.action_space])
+        if config.diverge_mode == 'random':
+            div_rb_path = Path('data') / config.env_id / \
+                config.model_name / 'random' / str(config.seed) / 'random_states.pbz2'
+        else:
+            div_rb_path = Path('data') / config.env_id / \
+                config.model_name / 'elite' / str(config.seed) / 'elite_states.pbz2'
+        div_rb.load_file(div_rb_path)
 
     t = 0
+    old_s_divs = None
+    signs = None
+    signs_dir = Path('results') / config.env_id / 'signs' / \
+                    (str(config.seed) + '-' + str(run_num))
+    signs_dir.mkdir(parents=True, exist_ok=True)
+    signs_path = signs_dir / (config.diverge_mode + '_signs.npy')
+
     for ep_i in range(0, config.n_episodes, config.n_rollout_threads):
         print("Episodes %i-%i of %i" % (ep_i + 1,
                                         ep_i + 1 + config.n_rollout_threads,
@@ -106,7 +116,7 @@ def run(config):
                     sample = replay_buffer.sample(config.batch_size,
                                                   to_gpu=config.use_gpu)
                     model.update_critic(sample, logger=logger)
-                    model.update_policies(sample, logger=logger)
+                    model.update_policies(sample, logger=logger, coma=coma)
                     model.update_all_targets()
                 model.prep_rollouts(device='cpu')
         ep_rews = replay_buffer.get_average_rewards(
@@ -121,13 +131,20 @@ def run(config):
             model.save(run_dir / 'incremental' / ('model_ep%i.pt' % (ep_i + 1)))
             model.save(run_dir / 'model.pt')
 
-            model.prep_training(device='gpu')
-            with torch.set_grad_enabled(False):
-                divs = calculate_divergence(div_rb, model, env.action_space[0].n)
-            for a_i, div in enumerate(divs):
-                logger.add_scalar('agent%i/mean_random_divs' % a_i, div, ep_i)
-            model.prep_rollouts(device='cpu')
+            if len(replay_buffer) >= 3000:
+                model.prep_training(device='gpu')
+                with torch.set_grad_enabled(False):
+                    rb = div_rb if div_rb else replay_buffer
+                    divs, old_s_divs, signs = calculate_divergence(
+                        rb, model, env.action_space[0].n, 
+                        config.diverge_mode, old_s_divs, signs)
+                    np.save(signs_path, signs)
+                for a_i, div in enumerate(divs):
+                    logger.add_scalar('agent%i/mean_random_divs' % a_i, div, ep_i)
+                model.prep_rollouts(device='cpu')
 
+    
+    np.save(signs_path, signs)
     model.save(run_dir / 'model.pt')
     env.close()
     logger.export_scalars_to_json(str(log_dir / 'summary.json'))
@@ -162,6 +179,7 @@ if __name__ == '__main__':
     parser.add_argument("--gamma", default=0.99, type=float)
     parser.add_argument("--reward_scale", default=100., type=float)
     parser.add_argument("--use_gpu", action='store_true')
+    parser.add_argument("--no_coma", action='store_true')
 
     config = parser.parse_args()
 
