@@ -62,27 +62,29 @@ def run(config):
                                  [obsp.shape[0] for obsp in env.observation_space],
                                  [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
                                   for acsp in env.action_space])
-    div_rb = None
-    if config.diverge_mode != 'recent':              
-        div_rb = ReplayBuffer(config.buffer_length, model.nagents,
-                                    [obsp.shape[0] for obsp in env.observation_space],
-                                    [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
-                                    for acsp in env.action_space])
-        if config.diverge_mode == 'random':
-            div_rb_path = Path('data') / config.env_id / \
-                config.model_name / 'random' / str(config.seed) / 'random_states.pbz2'
-        else:
-            div_rb_path = Path('data') / config.env_id / \
-                config.model_name / 'elite' / str(config.seed) / 'elite_states.pbz2'
-        div_rb.load_file(div_rb_path)
+    if config.diverge_mode:
+        div_rb = None
+        if config.diverge_mode != 'recent':              
+            div_rb = ReplayBuffer(config.buffer_length, model.nagents,
+                                        [obsp.shape[0] for obsp in env.observation_space],
+                                        [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
+                                        for acsp in env.action_space])
+            if config.diverge_mode == 'random':
+                div_rb_path = Path('data') / config.env_id / \
+                    config.model_name / 'random' / str(config.seed) / 'random_states.pbz2'
+            else:
+                div_rb_path = Path('data') / config.env_id / \
+                    config.model_name / 'elite' / str(config.seed) / 'elite_states.pbz2'
+            div_rb.load_file(div_rb_path)
 
     t = 0
-    old_s_divs = None
-    signs = None
-    signs_dir = Path('results') / config.env_id / 'signs' / \
-                    (str(config.seed) + '-' + str(run_num))
-    signs_dir.mkdir(parents=True, exist_ok=True)
-    signs_path = signs_dir / (config.diverge_mode + '_signs.npy')
+    if config.diverge_mode:
+        old_s_divs = None
+        signs = None
+        signs_dir = Path('results') / config.env_id / 'signs' / \
+                        (str(config.seed) + '-' + str(run_num))
+        signs_dir.mkdir(parents=True, exist_ok=True)
+        signs_path = signs_dir / (config.diverge_mode + '_signs.npy')
 
     for ep_i in range(0, config.n_episodes, config.n_rollout_threads):
         print("Episodes %i-%i of %i" % (ep_i + 1,
@@ -131,7 +133,7 @@ def run(config):
             model.save(run_dir / 'incremental' / ('model_ep%i.pt' % (ep_i + 1)))
             model.save(run_dir / 'model.pt')
 
-            if len(replay_buffer) >= 3000:
+            if config.diverge_mode and len(replay_buffer) >= 3000:
                 model.prep_training(device='gpu')
                 with torch.set_grad_enabled(False):
                     rb = div_rb if div_rb else replay_buffer
@@ -143,8 +145,8 @@ def run(config):
                     logger.add_scalar('agent%i/mean_random_divs' % a_i, div, ep_i)
                 model.prep_rollouts(device='cpu')
 
-    
-    np.save(signs_path, signs)
+    if config.diverge_mode:
+        np.save(signs_path, signs)
     model.save(run_dir / 'model.pt')
     env.close()
     logger.export_scalars_to_json(str(log_dir / 'summary.json'))
@@ -158,7 +160,7 @@ if __name__ == '__main__':
                         help="Name of directory to store " +
                              "model/training contents")
     parser.add_argument("--seed", default=42, type=int)
-    parser.add_argument("--diverge_mode", default='random', type=str)
+    parser.add_argument("--diverge_mode", default=None, type=str)
     parser.add_argument("--n_rollout_threads", default=12, type=int)
     parser.add_argument("--buffer_length", default=int(1e6), type=int)
     parser.add_argument("--n_episodes", default=50000, type=int)

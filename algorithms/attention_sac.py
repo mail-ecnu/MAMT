@@ -1,9 +1,13 @@
 import torch
 import torch.nn.functional as F
 from torch.optim import Adam
+from torch import Tensor
+from torch.autograd import Variable
+import numpy as np
 from utils.misc import soft_update, hard_update, enable_gradients, disable_gradients
 from utils.agents import AttentionAgent
 from utils.critics import AttentionCritic
+from progressbar import ProgressBar
 
 MSELoss = torch.nn.MSELoss()
 
@@ -78,11 +82,42 @@ class AttentionSAC(object):
         return [a.step(obs, explore=explore) for a, obs in zip(self.agents,
                                                                observations)]
 
+    def div_intrinsic_reward(self, obs, acs):
+        critic_in = list(zip(obs, acs))
+        critic_rets = self.critic(critic_in, return_all_q=True)
+
+        div_r_i = []
+        for i in range(self.nagents):
+            _, all_q = critic_rets[i]
+
+            min_pos_q = all_q.clone()
+            min_pos_q[min_pos_q < 0] = np.inf
+            min_pos_q = torch.min(min_pos_q, dim=1)[0]
+            min_pos_q[min_pos_q == np.inf] = 0.0
+
+            max_neg_q = all_q.clone()
+            max_neg_q[min_pos_q > 0] = -np.inf
+            max_neg_q = torch.max(max_neg_q, dim=1)[0]
+            max_neg_q[max_neg_q == -np.inf] = 0.0
+
+             # TODO: intrinsic reward + origin reward always >= 0
+            # sign = 1.0 if min_pos != 0.0 else -1.0
+            sign = 1.0
+            _r_i = sign * torch.sqrt((min_pos_q - max_neg_q) ** 2)
+            div_r_i.append(_r_i)
+
+        return div_r_i
+
     def update_critic(self, sample, soft=True, logger=None, **kwargs):
         """
         Update central critic for all agents
         """
         obs, acs, rews, next_obs, dones = sample
+        with torch.set_grad_enabled(False):
+            div_r_i = self.div_intrinsic_reward(next_obs, acs)
+            for i in range(self.nagents):
+                # TODO: how to select the optimal scaling factor
+                rews[i] += 0.1 * div_r_i[i]
         # Q loss
         next_acs = []
         next_log_pis = []
@@ -109,7 +144,7 @@ class AttentionSAC(object):
         q_loss.backward()
         self.critic.scale_shared_grads()
         grad_norm = torch.nn.utils.clip_grad_norm(
-            self.critic.parameters(), 10 * self.nagents)
+            self.critic.parameters(), 0.5)
         self.critic_optimizer.step()
         self.critic_optimizer.zero_grad()
 
@@ -119,7 +154,8 @@ class AttentionSAC(object):
         self.niter += 1
 
     def update_policies(self, sample, coma=True, soft=True, logger=None, **kwargs):
-        obs, acs, rews, next_obs, dones = sample
+        # obs, acs, rews, next_obs, dones = sample
+        obs, _, _, _, _ = sample
         samp_acs = []
         all_probs = []
         all_log_pis = []

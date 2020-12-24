@@ -182,8 +182,8 @@ def calculate_divergence(dataset, model, n_actions,
             # ret = np.expand_dims(ret[ret != np.max(ret)], axis=0)
             # remove zero
             ret = np.expand_dims(ret[ret != 0.0], axis=0)
-            min_pos = np.min(ret[ret > 0])
-            max_neg = np.max(ret[ret < 0])
+            min_pos = np.min(ret[ret > 0]) if np.sum(ret > 0) > 0 else 0.0
+            max_neg = np.max(ret[ret < 0]) if np.sum(ret < 0) > 0 else 0.0
             _d = np.sqrt((min_pos - max_neg) ** 2)
             # _d = np.mean(np.sum(np.sqrt((ret - ret.T) ** 2), axis=1))
             distances[a_i] += _d
