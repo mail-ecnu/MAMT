@@ -56,6 +56,7 @@ class AttentionSAC(object):
         self.pol_dev = 'cpu'  # device for policies
         self.critic_dev = 'cpu'  # device for critics
         self.trgt_pol_dev = 'cpu'  # device for target policies
+        self.old_pol_dev = 'cpu'  # device for old policies
         self.trgt_critic_dev = 'cpu'  # device for target critics
         self.niter = 0
 
@@ -67,6 +68,10 @@ class AttentionSAC(object):
     def target_policies(self):
         return [a.target_policy for a in self.agents]
 
+    @property
+    def old_policies(self):
+        return [a.old_policy for a in self.agents]
+
     def step(self, observations, explore=False):
         """
         Take a step forward in environment with all agents
@@ -77,6 +82,23 @@ class AttentionSAC(object):
         """
         return [a.step(obs, explore=explore) for a, obs in zip(self.agents,
                                                                observations)]
+    
+    def update_all_targets(self):
+        """
+        Update all target networks (called after normal updates have been
+        performed for each agent)
+        """
+        soft_update(self.target_critic, self.critic, self.tau)
+        for a in self.agents:
+            soft_update(a.target_policy, a.policy, self.tau)
+
+    def update_all_olds(self):
+        """
+        Update all old policy networks (called before normal policy updates have been
+        performed for each agent)
+        """
+        for a in self.agents:
+            hard_update(a.old_policy, a.policy)
 
     def update_critic(self, sample, soft=True, logger=None, **kwargs):
         """
@@ -123,29 +145,40 @@ class AttentionSAC(object):
         samp_acs = []
         all_probs = []
         all_log_pis = []
+        all_old_log_pis = []
         all_pol_regs = []
 
-        for a_i, pi, ob in zip(range(self.nagents), self.policies, obs):
+        for a_i, pi, old_pi, ob in zip(
+            range(self.nagents), self.policies, self.old_policies, obs):
             curr_ac, probs, log_pi, pol_regs, ent = pi(
                 ob, return_all_probs=True, return_log_pi=True,
                 regularize=True, return_entropy=True)
             logger.add_scalar('agent%i/policy_entropy' % a_i, ent,
                               self.niter)
+
+            old_log_pi = old_pi.logp_ac(ob, curr_ac)
+            kl_delta = (log_pi - old_log_pi).mean()
+            logger.add_scalar('agent%i/kl_delta' % a_i, kl_delta,
+                              self.niter)
+
             samp_acs.append(curr_ac)
             all_probs.append(probs)
             all_log_pis.append(log_pi)
+            all_old_log_pis.append(old_log_pi)
             all_pol_regs.append(pol_regs)
+
+        self.update_all_olds()
 
         critic_in = list(zip(obs, samp_acs))
         critic_rets = self.critic(critic_in, return_all_q=True)
-        for a_i, probs, log_pi, pol_regs, (q, all_q) in zip(range(self.nagents), all_probs,
-                                                            all_log_pis, all_pol_regs,
-                                                            critic_rets):
+        for a_i, probs, log_pi, old_log_pi, pol_regs, (q, all_q) in zip(
+            range(self.nagents), all_probs, all_log_pis, all_old_log_pis,
+            all_pol_regs, critic_rets):
             curr_agent = self.agents[a_i]
             v = (all_q * probs).sum(dim=1, keepdim=True)
             pol_target = q - v
             if soft:
-                pol_loss = (log_pi * (log_pi / self.reward_scale - pol_target).detach()).mean()
+                pol_loss = (log_pi * ((log_pi - old_log_pi) / self.reward_scale - pol_target).detach()).mean()
             else:
                 pol_loss = (log_pi * (-pol_target).detach()).mean()
             for reg in pol_regs:
@@ -166,22 +199,13 @@ class AttentionSAC(object):
                 logger.add_scalar('agent%i/grad_norms/pi' % a_i,
                                   grad_norm, self.niter)
 
-
-    def update_all_targets(self):
-        """
-        Update all target networks (called after normal updates have been
-        performed for each agent)
-        """
-        soft_update(self.target_critic, self.critic, self.tau)
-        for a in self.agents:
-            soft_update(a.target_policy, a.policy, self.tau)
-
     def prep_training(self, device='gpu'):
         self.critic.train()
         self.target_critic.train()
         for a in self.agents:
             a.policy.train()
             a.target_policy.train()
+            a.old_policy.train()
         if device == 'gpu':
             fn = lambda x: x.cuda()
         else:
@@ -197,6 +221,10 @@ class AttentionSAC(object):
             for a in self.agents:
                 a.target_policy = fn(a.target_policy)
             self.trgt_pol_dev = device
+        if not self.old_pol_dev == device:
+            for a in self.agents:
+                a.old_policy = fn(a.old_policy)
+            self.old_pol_dev = device
         if not self.trgt_critic_dev == device:
             self.target_critic = fn(self.target_critic)
             self.trgt_critic_dev = device

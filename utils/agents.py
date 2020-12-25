@@ -22,8 +22,13 @@ class AttentionAgent(object):
                                             num_out_pol,
                                             hidden_dim=hidden_dim,
                                             onehot_dim=onehot_dim)
-
+        self.old_policy = DiscretePolicy(num_in_pol,
+                                            num_out_pol,
+                                            hidden_dim=hidden_dim,
+                                            onehot_dim=onehot_dim)
+        
         hard_update(self.target_policy, self.policy)
+        hard_update(self.old_policy, self.policy)
         self.policy_optimizer = Adam(self.policy.parameters(), lr=lr)
 
     def step(self, obs, explore=False):
@@ -40,9 +45,11 @@ class AttentionAgent(object):
     def get_params(self):
         return {'policy': self.policy.state_dict(),
                 'target_policy': self.target_policy.state_dict(),
+                'old_policy': self.old_policy.state_dict(),
                 'policy_optimizer': self.policy_optimizer.state_dict()}
 
     def load_params(self, params):
         self.policy.load_state_dict(params['policy'])
         self.target_policy.load_state_dict(params['target_policy'])
+        self.old_policy.load_state_dict(params['old_policy'])
         self.policy_optimizer.load_state_dict(params['policy_optimizer'])

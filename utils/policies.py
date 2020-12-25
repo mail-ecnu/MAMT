@@ -79,3 +79,9 @@ class DiscretePolicy(BasePolicy):
         if len(rets) == 1:
             return rets[0]
         return rets
+
+    def logp_ac(self, obs, act):
+        out = super(DiscretePolicy, self).forward(obs)
+        log_probs = F.log_softmax(out, dim=1)
+        logp_ac = torch.sum(log_probs * act, dim=1, keepdim=True)
+        return logp_ac
