@@ -82,7 +82,7 @@ class AttentionSAC(object):
         """
         return [a.step(obs, explore=explore) for a, obs in zip(self.agents,
                                                                observations)]
-    
+
     def update_all_targets(self):
         """
         Update all target networks (called after normal updates have been
@@ -167,7 +167,8 @@ class AttentionSAC(object):
             all_old_log_pis.append(old_log_pi)
             all_pol_regs.append(pol_regs)
 
-        self.update_all_olds()
+        if (self.niter + 1) % 100 == 0:
+            self.update_all_olds()
 
         critic_in = list(zip(obs, samp_acs))
         critic_rets = self.critic(critic_in, return_all_q=True)
@@ -178,7 +179,8 @@ class AttentionSAC(object):
             v = (all_q * probs).sum(dim=1, keepdim=True)
             pol_target = q - v
             if soft:
-                pol_loss = (log_pi * ((log_pi - old_log_pi) / self.reward_scale - pol_target).detach()).mean()
+                # pol_loss = (log_pi * ((log_pi - old_log_pi) / self.reward_scale - pol_target).detach()).mean()
+                pol_loss = (log_pi * ((log_pi) / self.reward_scale - pol_target).detach()).mean()
             else:
                 pol_loss = (log_pi * (-pol_target).detach()).mean()
             for reg in pol_regs:
