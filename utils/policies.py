@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils.misc import onehot_from_logits, categorical_sample
+from utils.misc import onehot_from_logits, categorical_sample, th_log_q
 
 class BasePolicy(nn.Module):
     """

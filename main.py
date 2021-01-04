@@ -12,10 +12,10 @@ from utils.env_wrappers import SubprocVecEnv, DummyVecEnv
 from algorithms.attention_sac import AttentionSAC
 
 
-def make_parallel_env(env_id, n_rollout_threads, seed):
+def make_parallel_env(env_id, n_rollout_threads, seed, is_pettingzoo):
     def get_env_fn(rank):
         def init_env():
-            env = make_env(env_id, discrete_action=True)
+            env = make_env(env_id, discrete_action=True, pettingzoo=is_pettingzoo)
             env.seed(seed + rank * 1000)
             np.random.seed(seed + rank * 1000)
             return env
@@ -45,7 +45,7 @@ def run(config):
 
     torch.manual_seed(run_num)
     np.random.seed(run_num)
-    env = make_parallel_env(config.env_id, config.n_rollout_threads, run_num)
+    env = make_parallel_env(config.env_id, config.n_rollout_threads, run_num, config.pettingzoo)
     model = AttentionSAC.init_from_env(env,
                                        tau=config.tau,
                                        pi_lr=config.pi_lr,
@@ -54,9 +54,11 @@ def run(config):
                                        pol_hidden_dim=config.pol_hidden_dim,
                                        critic_hidden_dim=config.critic_hidden_dim,
                                        attend_heads=config.attend_heads,
-                                       reward_scale=config.reward_scale)
+                                       reward_scale=config.reward_scale,
+                                       tr_scale=config.tr_scale,
+                                       tsallis_q=config.tsallis_q)
     replay_buffer = ReplayBuffer(config.buffer_length, model.nagents,
-                                 [obsp.shape[0] for obsp in env.observation_space],
+                                 [obsp.shape[0] if len(obsp.shape) <= 1 else np.prod(obsp.shape) for obsp in env.observation_space],
                                  [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
                                   for acsp in env.action_space])
     t = 0
@@ -69,6 +71,7 @@ def run(config):
 
         for et_i in range(config.episode_length):
             # rearrange observations to be per agent, and convert to torch Variable
+            # import pdb; pdb.set_trace()
             torch_obs = [Variable(torch.Tensor(np.vstack(obs[:, i])),
                                   requires_grad=False)
                          for i in range(model.nagents)]
@@ -79,6 +82,7 @@ def run(config):
             # rearrange actions to be per environment
             actions = [[ac[i] for ac in agent_actions] for i in range(config.n_rollout_threads)]
             next_obs, rewards, dones, infos = env.step(actions)
+            # import pdb; pdb.set_trace()
             replay_buffer.push(obs, agent_actions, rewards, next_obs, dones)
             obs = next_obs
             t += config.n_rollout_threads
@@ -92,7 +96,7 @@ def run(config):
                     sample = replay_buffer.sample(config.batch_size,
                                                   to_gpu=config.use_gpu)
                     model.update_critic(sample, logger=logger)
-                    model.update_policies(sample, logger=logger)
+                    model.update_policies(sample, tr=config.use_tr, logger=logger)
                     model.update_all_targets()
                 model.prep_rollouts(device='cpu')
         ep_rews = replay_buffer.get_average_rewards(
@@ -138,7 +142,11 @@ if __name__ == '__main__':
     parser.add_argument("--tau", default=0.001, type=float)
     parser.add_argument("--gamma", default=0.99, type=float)
     parser.add_argument("--reward_scale", default=100., type=float)
+    parser.add_argument("--tr_scale", default=100., type=float)
+    parser.add_argument("--tsallis_q", default=1., type=float)
     parser.add_argument("--use_gpu", action='store_true')
+    parser.add_argument("--use_tr", action='store_true')
+    parser.add_argument("--pettingzoo", action='store_true')
 
     config = parser.parse_args()
 

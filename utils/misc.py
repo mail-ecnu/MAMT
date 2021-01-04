@@ -131,3 +131,9 @@ def sep_clip_grad_norm(parameters, max_norm, norm_type=2):
         clip_coef = max_norm / (p_norm + 1e-6)
         if clip_coef < 1:
             p.grad.data.mul_(clip_coef)
+
+def th_log_q(x, q=0.5):
+    # q = torch.tensor(q)
+    safe_x = torch.clamp(x, min=1e-6)
+    log_q_x = torch.where(torch.tensor(q==1.).cuda(), torch.log(safe_x), (torch.pow(safe_x, 1-q)-1)/(1-q))
+    return log_q_x

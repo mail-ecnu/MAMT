@@ -1,9 +1,10 @@
 import torch
 import torch.nn.functional as F
 from torch.optim import Adam
-from utils.misc import soft_update, hard_update, enable_gradients, disable_gradients
+from utils.misc import soft_update, hard_update, enable_gradients, disable_gradients, th_log_q
 from utils.agents import AttentionAgent
 from utils.critics import AttentionCritic
+import numpy as np
 
 MSELoss = torch.nn.MSELoss()
 
@@ -15,6 +16,8 @@ class AttentionSAC(object):
     def __init__(self, agent_init_params, sa_size,
                  gamma=0.95, tau=0.01, pi_lr=0.01, q_lr=0.01,
                  reward_scale=10.,
+                 tr_scale=10.,
+                 tsallis_q=0.5,
                  pol_hidden_dim=128,
                  critic_hidden_dim=128, attend_heads=4,
                  **kwargs):
@@ -53,6 +56,8 @@ class AttentionSAC(object):
         self.pi_lr = pi_lr
         self.q_lr = q_lr
         self.reward_scale = reward_scale
+        self.tr_scale = tr_scale
+        self.tsallis_q = tsallis_q
         self.pol_dev = 'cpu'  # device for policies
         self.critic_dev = 'cpu'  # device for critics
         self.trgt_pol_dev = 'cpu'  # device for target policies
@@ -140,7 +145,7 @@ class AttentionSAC(object):
             logger.add_scalar('grad_norms/q', grad_norm, self.niter)
         self.niter += 1
 
-    def update_policies(self, sample, soft=True, logger=None, **kwargs):
+    def update_policies(self, sample, soft=True, tr=False, logger=None, **kwargs):
         obs, acs, rews, next_obs, dones = sample
         samp_acs = []
         all_probs = []
@@ -179,8 +184,12 @@ class AttentionSAC(object):
             v = (all_q * probs).sum(dim=1, keepdim=True)
             pol_target = q - v
             if soft:
-                # pol_loss = (log_pi * ((log_pi - old_log_pi) / self.reward_scale - pol_target).detach()).mean()
-                pol_loss = (log_pi * ((log_pi) / self.reward_scale - pol_target).detach()).mean()
+                if tr:
+                    q_log_pi = th_log_q(torch.exp(log_pi), q=self.tsallis_q)
+                    q_old_log_pi = th_log_q(torch.exp(old_log_pi), q=self.tsallis_q)
+                    pol_loss = (log_pi * ((q_log_pi - q_old_log_pi) / self.tr_scale - pol_target).detach()).mean()
+                else:
+                    pol_loss = (log_pi * ((log_pi) / self.reward_scale - pol_target).detach()).mean()
             else:
                 pol_loss = (log_pi * (-pol_target).detach()).mean()
             for reg in pol_regs:
@@ -275,9 +284,14 @@ class AttentionSAC(object):
         sa_size = []
         for acsp, obsp in zip(env.action_space,
                               env.observation_space):
-            agent_init_params.append({'num_in_pol': obsp.shape[0],
+            if len(obsp.shape) > 1:
+                agent_init_params.append({'num_in_pol': np.prod(obsp.shape),
                                       'num_out_pol': acsp.n})
-            sa_size.append((obsp.shape[0], acsp.n))
+                sa_size.append((np.prod(obsp.shape), acsp.n))
+            else:
+                agent_init_params.append({'num_in_pol': obsp.shape[0],
+                                        'num_out_pol': acsp.n})
+                sa_size.append((obsp.shape[0], acsp.n))
 
         init_dict = {'gamma': gamma, 'tau': tau,
                      'pi_lr': pi_lr, 'q_lr': q_lr,
