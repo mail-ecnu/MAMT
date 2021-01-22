@@ -56,7 +56,7 @@ class DiscretePolicy(BasePolicy):
 
     def forward(self, obs, sample=True, return_all_probs=False,
                 return_log_pi=False, regularize=False,
-                return_entropy=False):
+                return_entropy=False, return_all_log_probs=False):
         out = super(DiscretePolicy, self).forward(obs)
         probs = F.softmax(out, dim=1)
         on_gpu = next(self.parameters()).is_cuda
@@ -65,6 +65,9 @@ class DiscretePolicy(BasePolicy):
         else:
             act = onehot_from_logits(probs)
         rets = [act]
+        if return_all_log_probs:
+            log_probs = F.log_softmax(out, dim=1)
+            rets.append(log_probs)
         if return_log_pi or return_entropy:
             log_probs = F.log_softmax(out, dim=1)
         if return_all_probs:

@@ -10,6 +10,7 @@ from utils.make_env import make_env
 from utils.buffer import ReplayBuffer
 from utils.env_wrappers import SubprocVecEnv, DummyVecEnv
 from algorithms.attention_sac import AttentionSAC
+from algorithms.attention_sac_tra import AttentionSACTra
 
 
 def make_parallel_env(env_id, n_rollout_threads, seed, is_pettingzoo):
@@ -46,17 +47,30 @@ def run(config):
     torch.manual_seed(run_num)
     np.random.seed(run_num)
     env = make_parallel_env(config.env_id, config.n_rollout_threads, run_num, config.pettingzoo)
-    model = AttentionSAC.init_from_env(env,
-                                       tau=config.tau,
-                                       pi_lr=config.pi_lr,
-                                       q_lr=config.q_lr,
-                                       gamma=config.gamma,
-                                       pol_hidden_dim=config.pol_hidden_dim,
-                                       critic_hidden_dim=config.critic_hidden_dim,
-                                       attend_heads=config.attend_heads,
-                                       reward_scale=config.reward_scale,
-                                       tr_scale=config.tr_scale,
-                                       tsallis_q=config.tsallis_q)
+    if not config.tra:
+        model = AttentionSAC.init_from_env(env,
+                                        tau=config.tau,
+                                        pi_lr=config.pi_lr,
+                                        q_lr=config.q_lr,
+                                        gamma=config.gamma,
+                                        pol_hidden_dim=config.pol_hidden_dim,
+                                        critic_hidden_dim=config.critic_hidden_dim,
+                                        attend_heads=config.attend_heads,
+                                        reward_scale=config.reward_scale,
+                                        tr_scale=config.tr_scale,
+                                        tsallis_q=config.tsallis_q)
+    else:
+        model = AttentionSACTra.init_from_env(env,
+                                        tau=config.tau,
+                                        pi_lr=config.pi_lr,
+                                        q_lr=config.q_lr,
+                                        gamma=config.gamma,
+                                        pol_hidden_dim=config.pol_hidden_dim,
+                                        critic_hidden_dim=config.critic_hidden_dim,
+                                        attend_heads=config.attend_heads,
+                                        reward_scale=config.reward_scale,
+                                        tr_scale=config.tr_scale,
+                                        tsallis_q=config.tsallis_q)
     replay_buffer = ReplayBuffer(config.buffer_length, model.nagents,
                                  [obsp.shape[0] if len(obsp.shape) <= 1 else np.prod(obsp.shape) for obsp in env.observation_space],
                                  [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
@@ -147,6 +161,7 @@ if __name__ == '__main__':
     parser.add_argument("--use_gpu", action='store_true')
     parser.add_argument("--use_tr", action='store_true')
     parser.add_argument("--pettingzoo", action='store_true')
+    parser.add_argument("--tra", action='store_true')
 
     config = parser.parse_args()
 
