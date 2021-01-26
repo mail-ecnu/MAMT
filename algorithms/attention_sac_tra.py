@@ -254,7 +254,8 @@ class AttentionSACTra(object):
             d_nses.append(d_ns)
         d_nses = torch.cat(d_nses, dim=1)
         # Update trust region assignment network
-        ns_loss = HuberLoss(kl_hat, d_nses.detach())
+        # ns_loss = HuberLoss(kl_hat, d_nses.detach())
+        ns_loss = MSELoss(kl_hat, d_nses.detach())
         self.tran_optimizer.zero_grad()
         ns_loss.backward(retain_graph=True)
         grad_norm = torch.nn.utils.clip_grad_norm(
@@ -285,7 +286,7 @@ class AttentionSACTra(object):
                                   grad_norm, self.niter)
 
         # Update local trust region
-        f_loss = sum(pol_losses) - kl_hat.mean()
+        f_loss = sum(pol_losses) + kl_hat.mean()
         for a_i in range(self.nagents):
             disable_gradients(self.policies[a_i])
         self.local_tr_optimizer.zero_grad()
@@ -300,7 +301,18 @@ class AttentionSACTra(object):
             logger.add_scalar('grad_norms/f', grad_norm, self.niter)
 
         for a_i, local_tr in enumerate(self.local_trs):
-            logger.add_scalar('agent%i/local_tr' % a_i, local_tr, self.niter)
+            logger.add_scalar('agent%i/local_tr_clip_before' % \
+                a_i, local_tr, self.niter)
+
+        self.trust_region_clipper()
+        for a_i, local_tr in enumerate(self.local_trs):
+            logger.add_scalar('agent%i/local_tr_clip_after' % \
+                a_i, local_tr, self.niter)
+
+    
+    def trust_region_clipper(self):
+        for a_i in range(self.nagents):
+            self.local_trs[a_i].data.clamp_(1e-2, 1e2)
 
 
     def prep_training(self, device='gpu'):

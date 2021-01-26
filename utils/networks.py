@@ -84,7 +84,7 @@ class TRAN(nn.Module):
     """
     Trust region assignment network
     """
-    def __init__(self, sa_sizes, hidden_dim=32, norm_in=True, sparse=0.15):
+    def __init__(self, sa_sizes, hidden_dim=32, norm_in=True, sparse=0.05):
         """
         Inputs:
             sa_sizes (list of (int, int)): Size of state and action spaces per 
@@ -124,12 +124,12 @@ class TRAN(nn.Module):
             # k_tr_encoder.add_module('enc_fc1', NegativeLinear(
             #     1, hidden_dim, affine=True))
             k_tr_encoder.add_module('enc_fc1', nn.Linear(
-                1, hidden_dim, affine=True))
+                1, hidden_dim, bias=True))
             k_tr_encoder.add_module('enc_nl1', nn.LeakyReLU())
             # k_tr_encoder.add_module('enc_fc2', NegativeLinear(
             #     hidden_dim, hidden_dim, affine=False))
             k_tr_encoder.add_module('enc_fc2', nn.Linear(
-                hidden_dim, hidden_dim, affine=False))
+                hidden_dim, hidden_dim, bias=False))
             k_tr_encoder.add_module('enc_nl2', nn.LeakyReLU())
             self.k_tr_encoders.append(k_tr_encoder)
 
@@ -137,7 +137,7 @@ class TRAN(nn.Module):
             # k_encoder.add_module('enc_fc1', NegativeLinear(
             #     hidden_dim*2, hidden_dim, affine=True))
             k_encoder.add_module('enc_fc1', nn.Linear(
-                hidden_dim*2, hidden_dim, affine=True))
+                hidden_dim*2, hidden_dim, bias=True))
             k_encoder.add_module('enc_nl', nn.LeakyReLU())
             self.k_encoders.append(k_encoder)
 
@@ -145,12 +145,12 @@ class TRAN(nn.Module):
             # k_decoder.add_module('dec_fc1', NegativeLinear(
             #     hidden_dim, hidden_dim, affine=True))
             k_decoder.add_module('dec_fc1', nn.Linear(
-                hidden_dim, hidden_dim, affine=True))
+                hidden_dim, hidden_dim, bias=True))
             k_decoder.add_module('dec_nl1', nn.LeakyReLU())
             # k_decoder.add_module('dec_fc2', NegativeLinear(
             #     hidden_dim, 1, affine=False))
             k_decoder.add_module('dec_fc2', nn.Linear(
-                hidden_dim, 1, affine=False))
+                hidden_dim, 1, bias=False))
             k_decoder.add_module('dec_nl2', nn.LeakyReLU())
             self.k_decoders.append(k_decoder)
 
@@ -167,12 +167,12 @@ class TRAN(nn.Module):
             # l_tr_encoder.add_module('enc_fc1', PositiveLinear(
             #     1, hidden_dim, affine=True))
             l_tr_encoder.add_module('enc_fc1', nn.Linear(
-                1, hidden_dim, affine=True))
+                1, hidden_dim, bias=True))
             l_tr_encoder.add_module('enc_nl1', nn.LeakyReLU())
             # l_tr_encoder.add_module('enc_fc2', PositiveLinear(
             #     hidden_dim, hidden_dim, affine=False))
             l_tr_encoder.add_module('enc_fc2', nn.Linear(
-                hidden_dim, hidden_dim, affine=False))
+                hidden_dim, hidden_dim, bias=False))
             l_tr_encoder.add_module('enc_nl2', nn.LeakyReLU())
             self.lambda_tr_encoders.append(l_tr_encoder)
 
@@ -180,12 +180,12 @@ class TRAN(nn.Module):
             # l_encoder.add_module('enc_fc1', PositiveLinear(
             #     hidden_dim*2, hidden_dim, affine=True))
             l_encoder.add_module('enc_fc1', nn.Linear(
-                hidden_dim*2, hidden_dim, affine=True))
+                hidden_dim*2, hidden_dim, bias=True))
             l_encoder.add_module('enc_nl1', nn.LeakyReLU())
             # l_encoder.add_module('enc_fc2', PositiveLinear(
             #     hidden_dim, 1, affine=False))
             l_encoder.add_module('enc_fc2', nn.Linear(
-                hidden_dim, 1, affine=False))
+                hidden_dim, 1, bias=False))
             l_encoder.add_module('enc_nl2', nn.LeakyReLU())
             self.lambda_encoders.append(l_encoder)
 
@@ -212,7 +212,7 @@ class TRAN(nn.Module):
                 for i, idx in enumerate(edge_indexes)])
 
         # shape: n_agents x batch_size x 1
-        batch_trs = torch.tensor(trs).unsqueeze(0).repeat(
+        batch_trs = torch.stack(trs).unsqueeze(0).repeat(
             batch_size, 1).t().unsqueeze(-1).cuda()
         # Step 1: extract state-action [k]-encoding for each agent
         k_sa_encodings = [encoder(inp) for encoder, inp in zip(
