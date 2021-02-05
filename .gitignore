@@ -8,6 +8,9 @@ multiagent-particle-envs
 data
 results
 *.ipynb
+*.csv
+*.pdf
+policy_net
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

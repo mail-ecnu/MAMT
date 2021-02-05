@@ -266,6 +266,7 @@ class AttentionSACTra(object):
             logger.add_scalar('losses/ns_loss', ns_loss, self.niter)
             logger.add_scalar('grad_norms/ns', grad_norm, self.niter)
         
+        # Update local policies TODO: update local modeling policy
         for a_i, pol_loss in enumerate(pol_losses):
             curr_agent = self.agents[a_i]
             # don't want critic to accumulate gradients from policy loss
