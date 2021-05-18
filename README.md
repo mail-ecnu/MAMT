@@ -1,4 +1,4 @@
-# Multi-Agent-Mirror-Descent-Policy-Optimization-with-Trust-Region-Decomposition
+# Dealing with Non-Stationarity in Multi-Agent Reinforcement Learning via Trust Region Decomposition
 
 ## Requirements
 * Python 3.6.1 (Minimum)
